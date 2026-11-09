@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="속도계">
+<meta name="apple-mobile-web-app-title" content="Speedo">
 <meta name="theme-color" content="#000000">
-<title>GPS 속도계</title>
+<title>GPS Speedometer</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; background: #000; color: #fff; font-family: -apple-system, system-ui, sans-serif; overflow: hidden; }
@@ -17,13 +17,15 @@
   .dot.ok { background: #30d158; }
   .dot.bad { background: #ff453a; }
   .dot.wait { background: #ffd60a; }
+  #compass { color: #fff; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #arrow { display: inline-block; color: #0a84ff; transition: transform 0.3s; transform: rotate(-90deg); }
   .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   #speed { font-size: 42vw; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
   #unit { font-size: 22px; color: #888; margin-top: 8px; cursor: pointer; padding: 8px 16px; }
   .bottom { display: flex; justify-content: space-around; padding: 0 20px 16px; }
   .stat { text-align: center; }
   .stat .label { font-size: 12px; color: #888; margin-bottom: 4px; }
-  .stat .value { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat .value { font-size: 20px; font-variant-numeric: tabular-nums; }
   .btns { display: flex; gap: 12px; padding: 0 20px 24px; }
   button { flex: 1; background: #1c1c1e; color: #fff; border: 0; border-radius: 14px; padding: 16px; font-size: 16px; font-weight: 600; }
   button:active { background: #2c2c2e; }
@@ -38,14 +40,14 @@
 
 <div id="start">
   <div style="font-size:64px">🛰️</div>
-  <h1 style="font-size:28px">GPS 속도계</h1>
-  <p>시작을 누르면 위치 권한을 요청합니다.<br>하늘이 보이는 곳에서 사용하세요.<br>Safari가 화면에 떠 있을 때만 동작합니다.</p>
-  <button class="primary" onclick="start()">시작</button>
+  <h1 style="font-size:28px">GPS Speedometer</h1>
+  <p>Tap Start to allow location access.<br>Use with a clear view of the sky.<br>Works only while Safari is on screen.</p>
+  <button class="primary" onclick="start()">Start</button>
 </div>
 
 <div class="top">
-  <span><span id="dot" class="dot"></span><span id="status">대기 중</span></span>
-  <span id="acc">—</span>
+  <span><span id="dot" class="dot"></span><span id="status">Idle</span></span>
+  <span id="compass"><span id="arrow">➤</span> <span id="dir">—</span></span>
 </div>
 
 <div class="main">
@@ -54,16 +56,17 @@
 </div>
 
 <div class="bottom">
-  <div class="stat"><div class="label">최고</div><div class="value" id="max">0</div></div>
-  <div class="stat"><div class="label">평균</div><div class="value" id="avg">0</div></div>
-  <div class="stat"><div class="label">거리</div><div class="value" id="dist">0.0 km</div></div>
+  <div class="stat"><div class="label">MAX</div><div class="value" id="max">0</div></div>
+  <div class="stat"><div class="label">AVG</div><div class="value" id="avg">0</div></div>
+  <div class="stat"><div class="label">DIST</div><div class="value" id="dist">0.0 km</div></div>
+  <div class="stat"><div class="label">TIME</div><div class="value" id="time">0m</div></div>
 </div>
 
 <div id="msg"></div>
 
 <div class="btns">
-  <button onclick="resetAll()">초기화</button>
-  <button id="toggle" onclick="toggleRun()">정지</button>
+  <button onclick="resetAll()">Reset</button>
+  <button id="toggle" onclick="toggleRun()">Stop</button>
 </div>
 
 <script>
@@ -74,6 +77,32 @@
   let distM = 0;               // 누적 거리 (m)
   let lastPos = null;
   let wakeLock = null;
+
+  // 작동 시간
+  let elapsedMs = 0;       // 정지 전까지 누적된 시간
+  let runStart = null;     // 현재 구간 시작 시각
+  let timerId = null;
+
+  function fmtTime(ms) {
+    const totalMin = Math.floor(ms / 60000);
+    const h = Math.floor(totalMin / 60), m = totalMin % 60;
+    return h ? h + 'h ' + m + 'm' : m + 'm';
+  }
+  function totalElapsed() { return elapsedMs + (runStart ? Date.now() - runStart : 0); }
+  function tick() { $('time').textContent = fmtTime(totalElapsed()); }
+  function startTimer() {
+    if (runStart) return;
+    runStart = Date.now();
+    timerId = setInterval(tick, 1000);
+    tick();
+  }
+  function stopTimer() {
+    if (!runStart) return;
+    elapsedMs += Date.now() - runStart;
+    runStart = null;
+    clearInterval(timerId); timerId = null;
+    tick();
+  }
 
   const $ = id => document.getElementById(id);
   const factor = () => unit === 'kmh' ? 3.6 : 2.23694;
@@ -93,9 +122,19 @@
       ? (distM / 1000).toFixed(1) + ' km'
       : (distM / 1609.344).toFixed(1) + ' mi';
     $('unit').textContent = unitLabel();
-    $('acc').textContent = (accMs != null && accMs >= 0)
-      ? '오차 ±' + (accMs * f).toFixed(1) + ' ' + unitLabel()
-      : '';
+  }
+
+  // 나침반: heading(0~360, 북=0)을 방위 이름으로
+  const DIRS = ['N','NE','E','SE','S','SW','W','NW'];
+  function renderCompass(heading) {
+    if (heading == null || isNaN(heading) || heading < 0) {
+      $('dir').textContent = '—';
+      return;
+    }
+    const idx = Math.round(heading / 45) % 8;
+    $('dir').textContent = DIRS[idx] + ' ' + Math.round(heading) + '°';
+    // ➤ 글자는 기본이 오른쪽(동)을 가리키므로 -90도 보정
+    $('arrow').style.transform = 'rotate(' + (heading - 90) + 'deg)';
   }
 
   // 두 좌표 간 거리 (m), Haversine
@@ -108,60 +147,94 @@
     return 2 * R * Math.asin(Math.sqrt(s));
   }
 
+  let lastMs = 0;       // 직전 유효 속도
+  let lastT = 0;        // 직전 유효 시각
+  let smoothMs = 0;     // 스무딩된 속도
+
   function onPos(pos) {
     const c = pos.coords;
-    let ms = c.speed;
 
-    // iOS는 speed가 null일 수 있음 → 이전 좌표와의 거리/시간으로 추정
+    // 1) 위치 정확도가 나쁘면(터널, 빌딩 숲) 샘플 버림
+    if (c.accuracy == null || c.accuracy > 30) {
+      setStatus('wait', 'Weak GPS ±' + Math.round(c.accuracy) + 'm');
+      return;
+    }
+
+    let ms = c.speed;
+    const dt = lastT ? (pos.timestamp - lastT) / 1000 : 0;
+
+    // 2) 칩에서 준 속도값의 오차가 크면 (±18 km/h 이상) 버림
+    if (ms != null && ms >= 0 && c.speedAccuracy != null && c.speedAccuracy > 5) {
+      ms = null;
+    }
+
+    // 3) 속도값이 없으면 이전 좌표와의 거리/시간으로 추정 (정확도 좋을 때만)
     if (ms == null || ms < 0) {
-      if (lastPos && c.accuracy < 50) {
-        const d = haversine(lastPos.coords, c);
-        const dt = (pos.timestamp - lastPos.timestamp) / 1000;
-        ms = dt > 0 ? d / dt : 0;
+      if (lastPos && c.accuracy < 20 && dt >= 0.8) {
+        ms = haversine(lastPos.coords, c) / dt;
       } else {
-        ms = 0;
+        return; // 추정 불가 → 이번 샘플 건너뜀
       }
     }
+
+    // 4) 물리적으로 불가능한 가속(0.8g 이상)은 튄 값으로 보고 버림
+    //    예: 1초 만에 40 → 145 km/h
+    if (dt > 0 && dt < 5 && Math.abs(ms - lastMs) / dt > 8) {
+      lastPos = pos; // 좌표만 갱신
+      return;
+    }
+
     if (ms < 0.5) ms = 0; // 정지 상태 노이즈 제거 (1.8 km/h 미만)
 
-    if (lastPos && c.accuracy < 50 && ms > 0) {
+    // 5) 가벼운 스무딩 (새 값 60%, 이전 값 40%)
+    smoothMs = lastT ? smoothMs * 0.4 + ms * 0.6 : ms;
+    if (ms === 0) smoothMs = 0;
+
+    if (lastPos && ms > 0) {
       distM += haversine(lastPos.coords, c);
     }
     lastPos = pos;
+    lastMs = ms;
+    lastT = pos.timestamp;
+    ms = smoothMs;
 
     if (ms > maxMs) maxMs = ms;
     if (ms > 0) { sumMs += ms; nSamples++; } // 이동 중 평균
 
     setStatus(c.accuracy < 20 ? 'ok' : 'wait',
-              'GPS 정확도 ±' + Math.round(c.accuracy) + 'm');
+              'GPS ±' + Math.round(c.accuracy) + 'm');
     render(ms, c.speedAccuracy);
+    // 움직일 때만 heading이 유효 (정지 시 마지막 방향 유지)
+    if (ms > 0.5) renderCompass(c.heading);
     $('msg').textContent = '';
   }
 
   function onErr(e) {
-    setStatus('bad', 'GPS 오류');
+    setStatus('bad', 'GPS error');
     const m = {
-      1: '위치 권한이 거부되었습니다. 설정 > Safari > 위치에서 허용해 주세요.',
-      2: '위치를 가져올 수 없습니다. 하늘이 보이는 곳으로 이동해 보세요.',
-      3: '위치 응답 시간 초과. 다시 시도 중…'
+      1: 'Location access denied. Allow it in Settings > Safari > Location.',
+      2: 'Location unavailable. Move to a spot with a clear view of the sky.',
+      3: 'Location timed out. Retrying…'
     };
     $('msg').textContent = m[e.code] || e.message;
   }
 
   function startWatch() {
     if (watchId != null) return;
-    setStatus('wait', 'GPS 검색 중…');
+    setStatus('wait', 'Searching GPS…');
     watchId = navigator.geolocation.watchPosition(onPos, onErr, {
       enableHighAccuracy: true, maximumAge: 0, timeout: 10000
     });
-    $('toggle').textContent = '정지';
+    $('toggle').textContent = 'Stop';
+    startTimer();
   }
 
   function stopWatch() {
     if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-    setStatus('', '정지됨');
-    $('toggle').textContent = '재개';
-    lastPos = null;
+    setStatus('', 'Stopped');
+    $('toggle').textContent = 'Resume';
+    lastPos = null; lastT = 0;
+    stopTimer();
   }
 
   async function requestWakeLock() {
@@ -174,7 +247,7 @@
 
   function start() {
     if (!('geolocation' in navigator)) {
-      alert('이 브라우저는 위치 정보를 지원하지 않습니다.'); return;
+      alert('This browser does not support geolocation.'); return;
     }
     $('start').style.display = 'none';
     requestWakeLock();
@@ -190,7 +263,11 @@
   }
 
   function resetAll() {
-    maxMs = 0; sumMs = 0; nSamples = 0; distM = 0; lastPos = null;
+    maxMs = 0; sumMs = 0; nSamples = 0; distM = 0;
+    lastPos = null; lastMs = 0; lastT = 0; smoothMs = 0;
+    elapsedMs = 0;
+    if (runStart) runStart = Date.now(); // 실행 중이면 0부터 다시
+    tick();
     render(0, null);
   }
 
